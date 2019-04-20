@@ -18,7 +18,12 @@ headers = {
     'Authorization': myApiKey,
     'Accept': 'application/vnd.api+json',
 }
-map_name_to_filter = "Erangel_Main"
+
+# map_name_to_filter = "Erangel_Main"
+
+# def map_name_filter(map_name):
+#     return map_name == map_name_to_filter
+
 
 def get_player_from_participants(participant_objects, player_id_to_find):
     participant_objects = list(participant_objects)
@@ -41,8 +46,7 @@ def get_placement_for_match(match, player_id_to_find):
     player_participant_object = get_participant_for_match(match, player_id_to_find)
     return player_participant_object["attributes"]["stats"]["winPlace"]
 
-
-def get_landing_position_for_match(match, player_id_to_find):
+async def download_telemetry_events_for_match(match):
     telemetry_object_id = match["data"]["relationships"]["assets"]["data"][0]["id"]
 
     included_objects = match["included"]
@@ -54,9 +58,15 @@ def get_landing_position_for_match(match, player_id_to_find):
 
     telemetry_events = requests.get(telemetry_url, headers=headers).json()
 
+    print(f"Downloaded telemetry object {telemetry_object_id}")
+
+    return telemetry_events
+
+
+def get_landing_position_from_telemetry_events(telemetry_events, player_id):
     landing_events = list(filter(lambda object: object["_T"] == "LogParachuteLanding", telemetry_events))
 
-    player_landing_event = next(object for object in landing_events if object["character"]["accountId"] == player_id_to_find)
+    player_landing_event = next(object for object in landing_events if object["character"]["accountId"] == player_id)
 
     player_landing_location = player_landing_event["character"]["location"]
     # asset_objects = filter(lambda object: object["id"] == telemetry_object_id, asset_objects)
@@ -68,54 +78,109 @@ def get_landing_position_for_match(match, player_id_to_find):
 def get_map_name_from_match(match):
     return match["data"]["attributes"]["mapName"]
 
-async def get_placement_for_match_id(match_id, player_id):
-    match = requests.get(f"https://api.pubg.com/shards/steam/matches/{match_id}", headers=headers).json()
+def get_number_of_teammates(match, player_id):
+
+    return -1
+def get_number_of_enemies_nearby(match, player_id):
+    return -1
+
+
+def get_statistics_for_match(match, telemetry_events, player_id):
+    
     placement = get_placement_for_match(match, player_id)
-    landing_position = get_landing_position_for_match(match, player_id)
+    landing_location = get_landing_position_from_telemetry_events(telemetry_events, player_id)
     map_name = get_map_name_from_match(match)
-    if map_name == map_name_to_filter:
-        print(f"Done for {match_id}")
-        return (landing_position, placement)
+    landmark = location_to_landmark(landing_location) 
+    number_of_teammates = get_number_of_teammates(match, player_id)
+    number_of_enemies_nearby = get_number_of_enemies_nearby(match, player_id)
 
-    print(f"Skipping for {match_id} (map: {map_name})")
-    return None
+    # return {
+    #     "landmark" : landmark,
+    #     "placement" : placement, 
+    #     "number_of_teammates" : number_of_teammates, 
+    #     "map_name" : map_name, 
+    #     "landing_location" : landing_location,
+    #     "number_of_enemies_nearby" : number_of_enemies_nearby,
+    # }
 
+    return (landmark, placement, number_of_teammates, map_name, landing_location, number_of_enemies_nearby)
 
-async def get_landing_and_placement_data_for_player(player_name):
+async def download_match_for_match_id(match_id):
+    match = requests.get(f"https://api.pubg.com/shards/steam/matches/{match_id}", headers=headers).json()
+    print(f"Downloaded match data for {match_id}")
+    return match
 
-    player = requests.get(f"https://api.pubg.com/shards/steam/players?filter[playerNames]={player_name}", headers=headers).json()
+# async def get_statistics_for_match_id(match_id, player_id):
+    
+
+#     player_statistics = get_statistics_for_match(match, player_id)
+
+#     print(f"Done for {match_id}")
+
+#     return player_statistics
+async def download_player_id_from_player_name(player_id):
+    player = requests.get(f"https://api.pubg.com/shards/steam/players?filter[playerNames]={player_id}", headers=headers).json()
     player_id = player["data"][0]["id"]
+    return player_id
+
+async def download_matches_for_player_id(player_id):
+    
+    player = requests.get(f"https://api.pubg.com/shards/steam/players/{player_id}", headers=headers).json()
 
     print(f"Player id: {player_id}")
 
-    matches = player["data"][0]["relationships"]["matches"]["data"]
+    matches = player["data"]["relationships"]["matches"]["data"]
     match_ids = list(map(lambda match: match["id"],  matches))
-
 
     tasks = []
     for match_id in match_ids:
-        task = get_placement_for_match_id(match_id, player_id)
+        task = download_match_for_match_id(match_id)
         tasks.append(task)
 
-
-    landing_and_placement = []
-
+    matches = []
     for task in tasks:
-        task_result = await task
-        if task_result is None:
+        match = await task
+        if match is None:
             continue
-        landing_position, placement = task_result
-        landing_and_placement.append((landing_position, placement))
+        matches.append(match)
 
-    return landing_and_placement
+    return matches
 
-def save_to_pickle(object_to_save):
-    with open('mydata.pkl', 'wb') as output:
+# async def get_statistics_for_player(player_name):
+
+#     player = requests.get(f"https://api.pubg.com/shards/steam/players?filter[playerNames]={player_name}", headers=headers).json()
+#     player_id = player["data"][0]["id"]
+
+#     print(f"Player id: {player_id}")
+
+#     matches = player["data"][0]["relationships"]["matches"]["data"]
+#     match_ids = list(map(lambda match: match["id"],  matches))
+
+
+#     tasks = []
+#     for match_id in match_ids:
+#         task = get_statistics_for_match_id(match_id, player_id)
+#         tasks.append(task)
+
+
+#     player_statistics = []
+
+#     for task in tasks:
+#         task_result = await task
+#         if task_result is None:
+#             continue
+#         landing_position, placement = task_result
+#         player_statistics.append((landing_position, placement))
+
+#     return player_statistics
+
+def save_to_pickle(object_to_save, fileName):
+    with open(fileName, 'wb') as output:
         pickle.dump(object_to_save, output, pickle.HIGHEST_PROTOCOL)
 
-def load_from_pickle():
+def load_from_pickle(fileName):
     try:
-        with open('mydata.pkl', 'rb') as input:
+        with open(fileName, 'rb') as input:
             return pickle.load(input)
     except:
         return None
@@ -162,31 +227,101 @@ def location_to_landmark(location):
 
     return "Other"
 
+class DownloadedData:
+    player_id = None
+    mathces = []
+
+async def download_data_for_player_name(player_name):
+    downloaded_data = DownloadedData()
+
+    downloaded_data.player_id = await download_player_id_from_player_name(player_name)
+
+    matches = await download_matches_for_player_id(downloaded_data.player_id)
+    
+    telemetry_download_tasks = []
+    for match in matches:
+        telemetry_download_task = download_telemetry_events_for_match(match)
+        telemetry_download_tasks.append((match, telemetry_download_task))
+
+    telemetry_data = []
+    for match, telemetry_download_task in telemetry_download_tasks:
+        telemetry_events = await telemetry_download_task
+        telemetry_data.append(telemetry_events)
+
+    downloaded_data.matches = list(zip(matches, telemetry_data))
+
+    # for match in downloaded_data.matches:
+    #     telemetry_events = await download_telemetry_events_for_match(match)
+    #     downloaded_data.telemetry_data[match] = telemetry_events
+    return downloaded_data
+
 async def main():
-    player_name = "Battlechicken_"
-
-    landing_and_placement = load_from_pickle()
-
+    cache_file_name = 'downloaded_data_bogi.pkl'
+    player_name = "Ugyismegkurlak"
+    # player_name = "Battlechicken_"
     redownload_data = False
 
-    if landing_and_placement is None or redownload_data:
-        landing_and_placement = await get_landing_and_placement_data_for_player(player_name)
-        save_to_pickle(landing_and_placement)
-   
+    downloaded_data = load_from_pickle(cache_file_name)
+    
 
-    landing_and_placement_zipped = zip(*landing_and_placement)
 
-    landing_locations = next(landing_and_placement_zipped)
-    placements = next(landing_and_placement_zipped)
+    if downloaded_data is None or redownload_data:
+        downloaded_data = await download_data_for_player_name(player_name)
+        save_to_pickle(downloaded_data, cache_file_name)
 
-    landmarks = map(location_to_landmark, landing_locations)
+    print("Calculating statistics...")
 
-    landmarks_and_placements = list(zip(landmarks, placements))
+    # player_id = await download_player_id_from_player_name(player_name)
+    player_statistics = []
+    for match, telemetry_events in downloaded_data.matches:
+        # telemetry_events = downloaded_data.telemetry_data[match]
+        statistics_for_singe_match = get_statistics_for_match(match, telemetry_events, downloaded_data.player_id)
+        player_statistics.append(statistics_for_singe_match)
 
-    print(landmarks_and_placements)
-    for landmark, placement in landmarks_and_placements:
-        print(f"{landmark}, {placement}")
-        pass
+    # download_matches_for_player
+    # matches = load_from_pickle('matches.pkl')
+
+
+
+    # if matches is None or redownload_data:
+    #     matches = await download_matches_for_player_id(player_id)
+    #     save_to_pickle(matches, 'matches.pkl')
+
+    # player_statistics = []
+    # for match in matches:
+    #     telemetry_events = await download_telemetry_events_for_match(match)
+    #     statistics_for_singe_match = get_statistics_for_match(match, telemetry_events, player_id)
+    #     player_statistics.append(statistics_for_singe_match)
+
+    # player_statistics = load_from_pickle('mydata.pkl')
+
+
+    # if player_statistics is None or redownload_data:
+    #     player_statistics = await get_statistics_for_player(player_name)
+    #     save_to_pickle(player_statistics, 'mydata.pkl')
+
+
+
+    player_statistics_zipped = list(zip(*player_statistics))
+
+    # print(row)
+    for row in player_statistics:
+        for value in row:
+            print(f"{value}, ", end='')
+        print("") # uj sor
+
+    # landing_locations = next(player_statistics_zipped)
+    # placements = next(player_statistics_zipped)
+
+    # landmarks = player_statistics_zipped[0]
+    # placements = player_statistics_zipped[1]
+
+    # landmarks_and_placements = list(zip(landmarks, placements))
+
+    # print(landmarks_and_placements)
+    # for landmark, placement in landmarks_and_placements:
+    #     print(f"{landmark}, {placement}")
+    #     pass
 
     pass
 
